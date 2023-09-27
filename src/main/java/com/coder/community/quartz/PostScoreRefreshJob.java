@@ -35,7 +35,7 @@ public class PostScoreRefreshJob implements Job, CommunityConstant {
     @Autowired
     private ElasticsearchService elasticsearchService;
 
-    // 牛客纪元
+    // Coder epoch
     private static final Date epoch;
 
     static {

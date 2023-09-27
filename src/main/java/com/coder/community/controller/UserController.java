@@ -15,6 +15,7 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.coder.community.annotation.LoginRequired;
@@ -25,6 +26,8 @@ import com.coder.community.service.UserService;
 import com.coder.community.util.CommunityConstant;
 import com.coder.community.util.CommunityUtil;
 import com.coder.community.util.HostHolder;
+import com.qiniu.util.Auth;
+import com.qiniu.util.StringMap;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -34,10 +37,48 @@ public class UserController implements CommunityConstant{
     
     private static final Logger logger = LoggerFactory.getLogger(UserController.class);
 
+    @Value("${qiniu.key.access}")
+    private String accessKey;
+
+    @Value("${qiniu.key.secret}")
+    private String secretKey;
+
+    @Value("${qiniu.bucket.header.name}")
+    private String headerBucketName;
+
+    @Value("${qiniu.bucket.header.url}")
+    private String headerBucketUrl;
+
     @LoginRequired
     @RequestMapping(path = "/setting", method = RequestMethod.GET)
-    public String getSettingPage() {
+    public String getSettingPage(Model model) {
+        // Upload file name
+        String fileName = CommunityUtil.generateUUID();
+        // Set respond info
+        StringMap policy = new StringMap();
+        policy.put("returnBody", CommunityUtil.getJSONString(0));
+        // Generate upload token
+        Auth auth = Auth.create(accessKey, secretKey);
+        String uploadToken = auth.uploadToken(headerBucketName, fileName, DEFAULT_EXPIRED_SECONDS, policy);
+        
+        model.addAttribute("uploadToken", uploadToken);
+        model.addAttribute("fileName", fileName);
+        
         return "/site/setting";
+    }
+    
+    // Upload header URL
+    @RequestMapping(path = "/header/url", method = RequestMethod.POST)
+    @ResponseBody
+    public String updateHeaderUrl(String fileName) {
+        if (StringUtils.isBlank(fileName)) {
+            return CommunityUtil.getJSONString(1, "Null file name!");
+        }
+        
+        String url = headerBucketUrl + "/" + fileName;
+        userService.updateHeader(hostHolder.getUser().getId(), url);
+
+        return CommunityUtil.getJSONString(0);
     }
 
     @Value("${community.path.upload}")
@@ -55,6 +96,7 @@ public class UserController implements CommunityConstant{
     @Autowired
     private HostHolder hostHolder;
 
+    @Deprecated
     @LoginRequired
     @RequestMapping(path = "/upload", method = RequestMethod.POST)
     public String uploadHeader(MultipartFile headerImage, Model model) {
@@ -93,6 +135,7 @@ public class UserController implements CommunityConstant{
         return "redirect:/index";
     }
 
+    @Deprecated
     @RequestMapping(path = "/header/{fileName}", method = RequestMethod.GET)
     public void getHeader(@PathVariable("fileName") String fileName, HttpServletResponse response) {
         // Server path
@@ -120,23 +163,18 @@ public class UserController implements CommunityConstant{
         User user = hostHolder.getUser();
         if (StringUtils.isBlank(newPassword)) {
             model.addAttribute("newError", "Password cannot be blank!");
-            System.out.println("++++++++++++++++++++++");
-            System.out.println(model);
             return "/site/setting";
         }
         newPassword = CommunityUtil.md5(newPassword + user.getSalt());
         oldPassword = CommunityUtil.md5(oldPassword + user.getSalt());
         if (!oldPassword.equals(user.getPassword())) {
             model.addAttribute("oldError", "Old password wrong!");
-            System.out.println("+++++++++++++++++++++++++++");
-            System.out.println(model);
             return "/site/setting";
         }
         if (newPassword.equals(oldPassword)) {
             model.addAttribute("newError", "New password and old password cannot be same!");
             return "/site/setting";
         }
-        System.out.println("123574890987762345678");
         userService.changePassword(user.getId(), newPassword);
 
         return "redirect:/index";
@@ -161,13 +199,11 @@ public class UserController implements CommunityConstant{
         int likeCount = likeService.findUserLikeCount(userId);
         model.addAttribute("likeCount", likeCount);
 
-        // 关注数量
         long followeeCount = followService.findFolloweeCount(userId, ENTITY_TYPE_USER);
         model.addAttribute("followeeCount", followeeCount);
-        // 粉丝数量
         long followerCount = followService.findFollowerCount(ENTITY_TYPE_USER, userId);
         model.addAttribute("followerCount", followerCount);
-        // 是否已关注
+
         boolean hasFollowed = false;
         if (hostHolder.getUser() != null) {
             hasFollowed = followService.hasFollowed(hostHolder.getUser().getId(), ENTITY_TYPE_USER, userId);
